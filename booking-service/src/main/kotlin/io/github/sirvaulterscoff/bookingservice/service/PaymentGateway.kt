@@ -4,6 +4,7 @@ import io.github.sirvaulterscoff.bookingservice.model.payments.TransferReservati
 import io.github.sirvaulterscoff.bookingservice.model.payments.ReserveFundsRequest
 import io.github.sirvaulterscoff.bookingservice.model.payments.ReserveFundsResponse
 import io.github.sirvaulterscoff.bookingservice.model.payments.ReserveFundsStatus
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.web.client.RestTemplate
@@ -12,7 +13,7 @@ import org.springframework.web.client.postForObject
 
 @Service
 class PaymentGateway {
-
+    private val logger = LoggerFactory.getLogger(javaClass)
     private val restTemplate = RestTemplate()
 
     fun reserveFunds(userId: String, amount: Long): Long? {
@@ -22,6 +23,7 @@ class PaymentGateway {
         return if (response.status == ReserveFundsStatus.RESERVED) {
             response.reservationId
         } else {
+            logger.error("Failed to reserve funds for user {}: {}", userId, response.status)
             null
         }
     }

@@ -52,8 +52,11 @@ class BookingListener(
                     BookingReceipt(bookingRequest.userId, reservationId, bookingRequest.amount)
                 )
                 logger.info("Sent receipt to {}", bookingRequest.userId)
+                throw RuntimeException()
                 ack.acknowledge()
             }
+        }?: run {
+            logger.error("Reserving funds failed")
         }
     }
 
