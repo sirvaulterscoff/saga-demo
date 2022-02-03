@@ -1,0 +1,27 @@
+POST localhost:8282/api/v1/account/111/reserve
+Content-Type: application/json
+
+{
+  "amount" : 10
+}
+
+###
+HEAD localhost:8282/api/v1/account/111
+
+###
+HEAD localhost:8282/api/v1/account/222
+
+###
+GET localhost:8282/api/v1/account/111
+
+###
+POST localhost:8282/api/v1/reserve/52
+Content-Type: application/json
+
+{
+  "accountId" : "222",
+  "purpose": "Buyin' some chips"
+}
+
+###
+DELETE localhost:8282/api/v1/reserve/52
