@@ -29,6 +29,16 @@ class BookingListener(
         ack: Acknowledgment
     ) {
         logger.info("Got new booking request from {} for {}", bookingRequest.userId, bookingRequest.bookingObjectId)
+        val previousBooking = bookingRepository.findByUserIdAndBookingObjectId(bookingRequest.userId, bookingRequest.bookingObjectId)
+            .firstOrNull {
+                it.from == bookingRequest.from && it.to == bookingRequest.to
+            }
+        if (previousBooking != null) {
+            logger.info("Previous booking from {} for {} found. Not charging", bookingRequest.userId, bookingRequest.bookingObjectId)
+            ack.acknowledge()
+            return
+        }
+
         val reservationId = paymentGateway.reserveFunds(bookingRequest.userId, bookingRequest.amount)
         reservationId?.let {
             logger.info("Succesfully reserved {} for account {}. Reservation id {}", bookingRequest.amount, bookingRequest.userId, it )
@@ -52,7 +62,6 @@ class BookingListener(
                     BookingReceipt(bookingRequest.userId, reservationId, bookingRequest.amount)
                 )
                 logger.info("Sent receipt to {}", bookingRequest.userId)
-                throw RuntimeException()
                 ack.acknowledge()
             }
         }?: run {
