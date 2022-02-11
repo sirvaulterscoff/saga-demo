@@ -18,7 +18,6 @@ import java.util.*
 class BookingListener(
     private val paymentGateway: PaymentGateway,
     private val bookingRepository: UserBookingRepository,
-    private val transactionalOutboxService: TransactionalOutboxRepository,
     private val kafkaTemplate: KafkaTemplate<Void, Any>
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -30,15 +29,6 @@ class BookingListener(
         ack: Acknowledgment
     ) {
         logger.info("Got new booking request from {} for {}", bookingRequest.userId, bookingRequest.bookingObjectId)
-        val previousBooking = bookingRepository.findByUserIdAndBookingObjectId(bookingRequest.userId, bookingRequest.bookingObjectId)
-            .firstOrNull {
-                it.from == bookingRequest.from && it.to == bookingRequest.to
-            }
-        if (previousBooking != null) {
-            logger.info("Previous booking from {} for {} found. Not charging", bookingRequest.userId, bookingRequest.bookingObjectId)
-            ack.acknowledge()
-            return
-        }
 
         val reservationId = paymentGateway.reserveFunds(bookingRequest.userId, bookingRequest.amount)
         reservationId?.let {
@@ -53,10 +43,23 @@ class BookingListener(
                 paymentGateway.unreserve(reservationId)
                 logger.info("Rolled back reservation of {} for account {}", bookingRequest.amount, bookingRequest.userId)
             }.onSuccess {
-                transactionalOutboxService.sendLater(
-                    BookingPrescript(bookingRequest.bookingObjectId, bookingRequest.from, bookingRequest.to),
-                    BookingReceipt(bookingRequest.userId, reservationId, bookingRequest.amount),
-                after = { ack.acknowledge() })
+                kotlin.runCatching {
+                    kafkaTemplate.send(
+                        "book_place",
+                        BookingPrescript(bookingRequest.bookingObjectId, bookingRequest.from, bookingRequest.to)
+                    )
+                    logger.info("Sent booking notification for {}", bookingRequest.bookingObjectId)
+                    kafkaTemplate.send(
+                        "client_receipt",
+                        BookingReceipt(bookingRequest.userId, reservationId, bookingRequest.amount)
+                    )
+                    logger.info("Sent receipt to {}", bookingRequest.userId)
+                    ack.acknowledge()
+                }.onFailure {
+                    val compensationReserveId = paymentGateway.reserveFunds(transitAccountId, bookingRequest.amount)
+                    paymentGateway.transferFunds(compensationReserveId!!, bookingRequest.userId, "Return for booking #${bookingId}")
+                    bookingRepository.deleteById(bookingId)
+                }
             }
         }?: run {
             logger.error("Reserving funds failed")
