@@ -1,5 +1,6 @@
 package io.github.sirvaulterscoff.bookingservice
 
+import io.github.sirvaulterscoff.bookingservice.service.TransactionalOutboxRepository
 import io.github.sirvaulterscoff.bookingservice.dao.UserBookingRepository
 import io.github.sirvaulterscoff.bookingservice.model.BookingPrescript
 import io.github.sirvaulterscoff.bookingservice.model.BookingReceipt
@@ -12,12 +13,12 @@ import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.kafka.support.Acknowledgment
 import org.springframework.stereotype.Component
 import java.util.*
-import kotlin.math.log
 
 @Component
 class BookingListener(
     private val paymentGateway: PaymentGateway,
     private val bookingRepository: UserBookingRepository,
+    private val transactionalOutboxService: TransactionalOutboxRepository,
     private val kafkaTemplate: KafkaTemplate<Void, Any>
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -52,17 +53,10 @@ class BookingListener(
                 paymentGateway.unreserve(reservationId)
                 logger.info("Rolled back reservation of {} for account {}", bookingRequest.amount, bookingRequest.userId)
             }.onSuccess {
-                kafkaTemplate.send(
-                    "book_place",
-                    BookingPrescript(bookingRequest.bookingObjectId, bookingRequest.from, bookingRequest.to)
-                )
-                logger.info("Sent booking notification for {}", bookingRequest.bookingObjectId)
-                kafkaTemplate.send(
-                    "client_receipt",
-                    BookingReceipt(bookingRequest.userId, reservationId, bookingRequest.amount)
-                )
-                logger.info("Sent receipt to {}", bookingRequest.userId)
-                ack.acknowledge()
+                transactionalOutboxService.sendLater(
+                    BookingPrescript(bookingRequest.bookingObjectId, bookingRequest.from, bookingRequest.to),
+                    BookingReceipt(bookingRequest.userId, reservationId, bookingRequest.amount),
+                after = { ack.acknowledge() })
             }
         }?: run {
             logger.error("Reserving funds failed")
